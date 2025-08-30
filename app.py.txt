@@ -1,0 +1,66 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+st.title("Modelo DuPont - Análisis de Rentabilidad")
+
+st.markdown("""
+Sube tu archivo con los siguientes campos mínimos por período:
+
+- `Periodo`
+- `Utilidad Neta`
+- `Ventas Netas`
+- `Activos Totales`
+- `Capital Contable`
+
+El reporte se generará automáticamente por período.
+""")
+
+uploaded_file = st.file_uploader("Carga un archivo .csv o .xlsx", type=["csv", "xlsx"])
+
+if uploaded_file:
+    # Leer archivo
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
+
+    # Validación de columnas mínimas
+    required_columns = ["Periodo", "Utilidad Neta", "Ventas Netas", "Activos Totales", "Capital Contable"]
+    if not all(col in df.columns for col in required_columns):
+        st.error("⚠️ El archivo no contiene todas las columnas requeridas.")
+    else:
+        # Agrupación por período (por si hay más de una fila por período)
+        df_grouped = df.groupby("Periodo").sum().reset_index()
+
+        # Cálculo de indicadores DuPont
+        df_grouped["Margen Neto (%)"] = df_grouped["Utilidad Neta"] / df_grouped["Ventas Netas"] * 100
+        df_grouped["Rotación (veces)"] = df_grouped["Ventas Netas"] / df_grouped["Activos Totales"]
+        df_grouped["Apalancamiento (veces)"] = df_grouped["Activos Totales"] / df_grouped["Capital Contable"]
+        df_grouped["ROE (%)"] = df_grouped["Margen Neto (%)"] * df_grouped["Rotación (veces)"]
+        df_grouped["ROA (%)"] = df_grouped["Rotación (veces)"] * df_grouped["Apalancamiento (veces)"]
+        df_grouped["Pay Back Capital (veces)"] = 1 / (df_grouped["ROE (%)"] / 100)
+        df_grouped["Pay Back Activos (veces)"] = 1 / (df_grouped["ROA (%)"] / 100)
+
+        # Redondear según tipo de indicador
+        tabla = df_grouped.set_index("Periodo")[[
+            "Margen Neto (%)", "ROE (%)", "ROA (%)",        # Relativos
+            "Rotación (veces)", "Apalancamiento (veces)",   # Absolutos
+            "Pay Back Capital (veces)", "Pay Back Activos (veces)"
+        ]].T
+
+        # Redondeo: relativos con 1 decimal, absolutos con 1 decimal
+        tabla.loc[["Margen Neto (%)", "ROE (%)", "ROA (%)"]] = tabla.loc[[
+            "Margen Neto (%)", "ROE (%)", "ROA (%)"]].applymap(lambda x: round(x, 1))
+        tabla.loc[["Rotación (veces)", "Apalancamiento (veces)", "Pay Back Capital (veces)", "Pay Back Activos (veces)"]] = tabla.loc[[
+            "Rotación (veces)", "Apalancamiento (veces)", "Pay Back Capital (veces)", "Pay Back Activos (veces)"]].applymap(lambda x: round(x, 1))
+
+        st.success("✅ Análisis generado correctamente")
+        st.dataframe(tabla)
+
+        # Botón para descargar Excel
+        output = tabla.reset_index()
+        output.columns = ["Concepto"] + list(output.columns[1:])
+        excel_output = output.to_excel(index=False, engine='openpyxl')
+
+        st.download_button("📥 Descargar reporte Excel", data=excel_output, file_name="reporte_dupont.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
